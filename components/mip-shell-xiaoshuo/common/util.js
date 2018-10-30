@@ -167,7 +167,9 @@ export const getCurrentIframe = (iframe,url) =>{
     $el.style.display = "block"
     $el.style.position = "static"
     $el.style.opacity = 1
-    $el.style.height = $el.contentWindow.document.body.clientHeight + "px"
+    $el.style.height = $el.contentWindow.document.body.clientHeight + 400 + "px"
+    console.log($el.contentWindow.document.body.clientHeight)
+    console.log($el.style.height)
     $el.style.overflowY = "auto"
     const item = currentIframeDocument.querySelector('.mip-shell-xiaoshuo-container')
     if (item) {
