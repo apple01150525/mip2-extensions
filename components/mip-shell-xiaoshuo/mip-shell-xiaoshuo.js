@@ -15,13 +15,18 @@ import {
 
 import XiaoshuoEvents from './common/events'
 import Strategy from './ad/strategy'
-import {getJsonld, scrollBoundary, getCurrentWindow} from './common/util'
+import {getJsonld, scrollBoundary, getCurrentWindow, getNextWindow, getCurrentIframe, initNextIframe} from './common/util'
 import {sendWebbLog, sendTCLog} from './common/log' // 日志
+import * as flag from './common/flag' // 日志
+import { setTimeout, clearTimeout} from 'timers';
 
 let xiaoshuoEvents = new XiaoshuoEvents()
 let strategy = new Strategy()
 let util = MIP.util
-
+let currentIframeWindow = getCurrentWindow()
+let rootPageHideflag = null
+let iframeQuery = new Array(3)
+let prerenderFlag = false
 export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
   // 继承基类 shell, 扩展小说shell
   constructor (...args) {
@@ -30,6 +35,7 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     // 处理浏览器上下滚动边界，关闭弹性
     scrollBoundary()
     this.pageNum = 0
+    this.rootPageWin = MIP.viewer.page.isRootPage ? window : window.parent
   }
 
   // 基类方法：绑定页面可被外界调用的事件。
@@ -66,6 +72,7 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
         }
       })
     })
+
 
     // 绑定底部弹层控制条拖动事件
     this.addEventAction('showFontAdjust', e => this.fontSize.showFontBar(e))
@@ -109,27 +116,170 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     window.MIP.viewer.page.emitCustomEvent(window, true, {
       name: 'changePageStyle'
     })
-
+    
     strategy.eventAllPageHandler()
 
     // 绑定小说每个页面的监听事件，如翻页，到了每章最后一页
     xiaoshuoEvents.bindAll()
-
-    // 当页面翻页后，需要修改footer中【上一页】【下一页】链接
+    let jsonld = getJsonld(getCurrentWindow())
+    let footerConfig = jsonld
+    if (flag.isAndroid) {
+      if(isRootPage){
+        this.unlimitedPulldown(jsonld)
+        console.log(isRootPage)
+      }
+    } else {
+      this.readerPrerender (jsonld)
+      // 当页面翻页后，需要修改footer中【上一页】【下一页】链接
+      if(window.MIP.util.isCacheUrl(location.href)) { // cache页，需要改变翻页的地址为cache地址
+        footerConfig.nextPage.url = this.getCacheUrl(footerConfig.nextPage.url)
+        footerConfig.previousPage.url = this.getCacheUrl(footerConfig.previousPage.url)
+      }
+    }
     if (!isRootPage) {
-      let jsonld = getJsonld(window)
       window.MIP.viewer.page.emitCustomEvent(window.parent, false, {
         name: 'updateShellFooter',
         data: {
-          'jsonld': jsonld
+          'jsonld': footerConfig
         }
       })
     }
   }
 
+  readerPrerender(jsonld) {
+    let nextPageUrl = jsonld.nextPage.url
+    let prePageUrl = jsonld.previousPage.url
+    if(window.MIP.util.isCacheUrl(location.href)) { //处于cache下，需要转换cacheUrl
+      window.MIP.viewer.page.prerender([this.getCacheUrl(nextPageUrl), this.getCacheUrl(prePageUrl)])
+    } else {
+      window.MIP.viewer.page.prerender([nextPageUrl, prePageUrl])
+    }
+  }
+  /**
+   * 安卓机并且为小流量的时候走无限下拉的逻辑
+   * @private unlimitedPulldown： 小说内部私有方法
+   */
+  unlimitedPulldown (jsonld) {
+    let page = this.rootPageWin.MIP.viewer.page
+    let nextPageUrl = jsonld.nextPage.url
+    let prePageUrl = jsonld.previousPage.url
+    window.MIP.viewer.page.replace(nextPageUrl, {skipRender: true})
+    
+    if(window.MIP.util.isCacheUrl(location.href)) { //处于cache下，需要转换cacheUrl
+      window.MIP.viewer.page.prerender([this.getCacheUrl(prePageUrl), this.getCacheUrl(nextPageUrl)]).then( iframe => {
+        prerenderFlag = true
+        const currentIframeQuery = this.getIframeQuery(currentIframeWindow, iframe)
+        iframeQuery = currentIframeQuery.slice(0)
+        this.removeIframe()
+        getCurrentIframe(iframe,this.getCacheUrl(nextPageUrl))
+      })
+    } else {
+      window.MIP.viewer.page.prerender([nextPageUrl, prePageUrl]).then( iframe => {
+        this.removeIframe()
+        getCurrentIframe(iframe)
+      })
+    }
+    currentIframeWindow  = getNextWindow()
+    setTimeout(this.watchScroll.bind(this), 1000)
+  }
+  /**
+   * 移除多余的iframe
+   * @private removeIframe 小说内部私有方法
+   */
+  removeIframe (){
+    if (MIP.viewer.page.isRootPage) return
+    let page = this.rootPageWin.MIP.viewer.page
+    for (let i = 0; i <= page.children.length; i++) {
+      let currentPage = page.children[i]
+      if(!currentPage) break
+      // 如果满足某些条件，选中了某个 iframe 的话，删除操作如下：
+      // 注意：绝对不能删除当前页面，必须谨慎操作！
+      if (!currentPage.isRootPage && !iframeQuery.includes(currentPage.pageId)) {
+        let iframe1 = page.getIFrame(currentPage.pageId)
+        if (iframe1.parentNode) {
+          iframe1.parentNode.removeChild(iframe1)
+          page.children.splice(i, 1)
+          break
+        }
+      }
+    }
+  }
+  /**
+   * 获取当前iframe队列
+   * @private getIframeQuery 小说内部私有方法
+   */
+  getIframeQuery (currentWindow, iframe){
+    let page = currentWindow.MIP.viewer.page
+    let arrayIframe = []
+    arrayIframe.push(page.pageId)
+    iframe.forEach((item) => {
+      !item || !item.contentWindow || !item.contentWindow.MIP ? arrayIframe.push(null) : arrayIframe.push(item.contentWindow.MIP.pageId)
+    })
+
+    return arrayIframe
+  }
+  /**
+   * 隐藏rootpage页
+   * @private hideRootPage 小说内部私有方法
+   */
+  hideRootPage (){
+    let rootPage = this.rootPageWin.document.querySelector('[mip-shell-scrollboundary=true]')
+    rootPage.style.display = 'none'
+    rootPageHideflag = true
+  }
+  getViewportSize (w) {
+    return {w: this.rootPageWin.document.documentElement.clientWidth, h: this.rootPageWin.document.documentElement.clientHeight}
+  }
+  /**
+   * 判断滚动条是否在页面底部
+   * @private isScrollToPageBottom：小说内部私有方法，判断滚动条是否在页面底部
+   */
+  isScrollToPageBottom () {
+    //文档高度
+    const documentHeight = this.rootPageWin.document.documentElement.offsetHeight
+    const viewPortHeight = this.getViewportSize().h
+    const scrollHeight = this.rootPageWin.pageYOffset ||
+        this.rootPageWin.document.documentElement.scrollTop ||
+        this.rootPageWin.document.body.scrollTop || 0
+    return documentHeight - viewPortHeight - scrollHeight < 1000
+  }
+  /**
+   * 监控滚动条滚动到页面底部，需要加载新的数据,并且显示加载提示
+   * @private watchScroll：小说内部私有方法，用于监控滚动条
+   */
+  watchScroll () {
+    if (!this.isScrollToPageBottom() || prerenderFlag) {
+      prerenderFlag = false
+      setTimeout(this.watchScroll.bind(this), 2000)
+      return
+    }
+    let jsonld = getJsonld(currentIframeWindow)
+    // if(!rootPageHideflag) this.hideRootPage()
+    this.unlimitedPulldown(jsonld)
+  }
+
+  getCacheUrl (url) {
+    if(!!url) {
+      let netUrl = url.split('/')[2].split('.').join('-')
+      return `https://${netUrl}.mipcdn.com${MIP.util.makeCacheUrl(url)}`
+    }
+    return ''
+  }
+
   // 基类方法，翻页之后执行的方法
   // 记录翻页的白屏
   afterSwitchPage (options) {
+    let footerConfig = getJsonld(getCurrentWindow())
+    if(window.MIP.util.isCacheUrl(location.href)) { // cache页，需要改变翻页的地址为cache地址
+      footerConfig.nextPage.url = this.getCacheUrl(footerConfig.nextPage.url)
+      footerConfig.previousPage.url = this.getCacheUrl(footerConfig.previousPage.url)
+    }
+    window.MIP.viewer.page.emitCustomEvent(window.parent, false, {
+      name: 'updateShellFooter',
+      data: {
+        'jsonld': footerConfig
+      }
+    })
     // 用于记录页面加载完成的时间
     const startRenderTime = xiaoshuoEvents.timer
     const currentWindow = getCurrentWindow()
@@ -195,8 +345,13 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
   asyncInitObject () {
     let configMeta = this.currentPageMeta
     // 创建底部 bar
+    let footerConfig = getJsonld(window)
+    if(window.MIP.util.isCacheUrl(location.href)) { // cache页，需要改变翻页的地址为cache地址
+      footerConfig.nextPage.url = this.getCacheUrl(footerConfig.nextPage.url)
+      footerConfig.previousPage.url = this.getCacheUrl(footerConfig.previousPage.url)
+    }
     this.footer = new Footer(configMeta.footer)
-    this.footer.updateDom(getJsonld(window))
+    this.footer.updateDom(footerConfig)
     // 创建目录侧边栏
     this.catalog = new Catalog(configMeta.catalog, configMeta.book)
     this.header = new Header(this.$el)

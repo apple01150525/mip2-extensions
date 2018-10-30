@@ -3,6 +3,8 @@
  * @author JennyL
  * @author liujing
  */
+import {Constant} from './constant-config'
+let nextWindow = window.MIP.viewer.page.targetWindow
 
 export const getJsonld = (currentWindow) => {
   // 获取<head>中声明的mip-shell-xiaoshuo 配置。
@@ -26,6 +28,26 @@ export const getJsonld = (currentWindow) => {
  * @returns {window} 当前iframe的window
  */
 export const getCurrentWindow = () => {
+  let pageId = window.MIP.viewer.page.currentPageId
+  let pageInfo = window.MIP.viewer.page.getPageById(pageId)
+  return pageInfo.targetWindow
+}
+
+/**
+ * 获取下一个的iframe的window
+ *
+ * @returns {window} 当前下一个iframe的window
+ */
+export const getNextWindow = () => {
+  return nextWindow
+}
+
+/**
+ * 获取上一个的iframe的window
+ *
+ * @returns {window} 当前上一个iframe的window
+ */
+export const getPreWindow = () => {
   let pageId = window.MIP.viewer.page.currentPageId
   let pageInfo = window.MIP.viewer.page.getPageById(pageId)
   return pageInfo.targetWindow
@@ -118,3 +140,64 @@ export const scrollBoundary = () => {
     }
   })
 }
+/**
+ * 判断元素是否含有某个类
+ */
+function hasClass( elements,cName ){
+  return !!elements.className.match( new RegExp( "(\\s|^)" + cName + "(\\s|$)") ); // ( \\s|^ ) 判断前面是否有空格 （\\s | $ ）判断后面是否有空格 两个感叹号为转换为布尔值 以方便做判断
+};
+/**
+ * 添加类
+ */
+function addClass(elements,cName){
+  if (!hasClass(elements,cName)) {
+    elements.className += " " + cName
+  }
+}
+/**
+ * 获取iframe
+ */
+export const getCurrentIframe = (iframe,url) =>{
+  if(!iframe[1] || !iframe[1].contentWindow || !iframe[1].contentWindow.MIP) return
+  const $el = iframe[1]
+  // console.log($el.getAttribute("prerender"))
+  nextWindow = $el.contentWindow.MIP.viewer.page.targetWindow
+  if($el.dataset.pageId === url){
+    const currentIframeDocument = $el.contentWindow.document
+    $el.style.display = "block"
+    $el.style.position = "static"
+    $el.style.opacity = 1
+    $el.style.height = $el.contentWindow.document.body.clientHeight + "px"
+    $el.style.overflowY = "auto"
+    const item = currentIframeDocument.querySelector('.mip-shell-xiaoshuo-container')
+    if (item) {
+      item.classList.add('show-xiaoshuo-container')
+    }
+    if ($el.isPrerender || ($el && $el.getAttribute('prerender') === '1')) {
+      $el.contentWindow.postMessage({
+        name: window.name,
+        event: Constant.MESSAGE_PAGE_ACTIVE
+      },'*')
+      $el.isPrerender = false
+      $el.removeAttribute('prerender')
+    }
+  }
+}
+/**
+ * init iframe
+ */
+export const initNextIframe = () => {
+  let pageId = window.MIP.viewer.page.children[1].pageId
+  let iframe = window.MIP.viewer.page.getIFrame(pageId)
+
+  return iframe
+}
+
+
+
+
+
+
+
+
+

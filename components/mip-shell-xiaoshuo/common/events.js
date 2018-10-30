@@ -52,6 +52,7 @@ export default class XiaoshuoEvents {
     })
     this.bindPrePageButton()
     this.bindNextPageButton()
+  
   }
 
   /**
