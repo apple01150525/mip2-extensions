@@ -25,8 +25,11 @@ let strategy = new Strategy()
 let util = MIP.util
 let currentIframeWindow = getCurrentWindow()
 let rootPageHideflag = null
-let iframeQuery = new Array(3)
+let iframeQuery = []
+let iframeMap = {}
 let prerenderFlag = false
+let loading = false
+let lastScrollY = window.scrollY
 export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
   // 继承基类 shell, 扩展小说shell
   constructor (...args) {
@@ -146,7 +149,6 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     if (flag.isAndroid) {
       if(isRootPage){
         this.unlimitedPulldown(jsonld)
-        console.log(isRootPage)
       }
     } else {
       this.readerPrerender (jsonld)
@@ -166,6 +168,24 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     }
   }
 
+  showLoading () {
+    let div = document.createElement('div')
+    div.setAttribute('id','iframeloading')
+    div.style.position = 'fixed'
+    div.style.bottom = '55px'
+    div.style.left = 0
+    div.style.zIndex = 9999999999
+    div.innerHTML = '正在加载。。。。'
+    this.rootPageWin.document.body.appendChild(div)
+    this.rootPageWin.document.body.style.overflowY = 'hidden'
+  }
+
+  removeLoading () {
+    let div = this.rootPageWin.document.getElementById("iframeloading")
+    this.rootPageWin.document.body.removeChild(div)
+    this.rootPageWin.document.body.style.overflowY = 'auto'
+  }
+
   readerPrerender(jsonld) {
     let nextPageUrl = jsonld.nextPage.url
     let prePageUrl = jsonld.previousPage.url
@@ -180,6 +200,7 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
    * @private unlimitedPulldown： 小说内部私有方法
    */
   unlimitedPulldown (jsonld) {
+    this.showLoading()
     let page = this.rootPageWin.MIP.viewer.page
     let nextPageUrl = jsonld.nextPage.url
     let prePageUrl = jsonld.previousPage.url
@@ -192,6 +213,9 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
         iframeQuery = currentIframeQuery.slice(0)
         this.removeIframe()
         getCurrentIframe(iframe,this.getCacheUrl(nextPageUrl))
+        // window.MIP.viewer.page.replace(nextPageUrl, {skipRender: true})
+        this.removeLoading()
+        loading = false
       })
     } else {
       window.MIP.viewer.page.prerender([nextPageUrl, prePageUrl]).then( iframe => {
@@ -200,15 +224,15 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
       })
     }
     currentIframeWindow  = getNextWindow()
-    setTimeout(this.watchScroll.bind(this), 1000)
+    setTimeout(this.watchScroll.bind(this), 500)
   }
   /**
    * 移除多余的iframe
    * @private removeIframe 小说内部私有方法
    */
   removeIframe (){
-    if (MIP.viewer.page.isRootPage) return
     let page = this.rootPageWin.MIP.viewer.page
+    if (page.children.length < 4) return
     for (let i = 0; i <= page.children.length; i++) {
       let currentPage = page.children[i]
       if(!currentPage) break
@@ -216,13 +240,35 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
       // 注意：绝对不能删除当前页面，必须谨慎操作！
       if (!currentPage.isRootPage && !iframeQuery.includes(currentPage.pageId)) {
         let iframe1 = page.getIFrame(currentPage.pageId)
+        let div = null
+        let obj = {}
         if (iframe1.parentNode) {
+          
+          if( iframe1.contentWindow.document.body.clientHeight) {
+            div = document.createElement('div')
+            div.setAttribute('iframeId', MIP.util.getOriginalUrl(currentPage.pageId))
+            div.style.height = iframe1.contentWindow.document.body.clientHeight + 400 +'px'
+            div.style.display = 'none'
+            obj.height = div.style.height
+            this.rootPageWin.document.body.insertBefore(div,iframe1)
+          }
+          obj.iframe = iframe1
           iframe1.parentNode.removeChild(iframe1)
           page.children.splice(i, 1)
+          if (div) {
+            div.style.display = 'block'
+            obj.top = div.offsetTop
+            let key = MIP.util.getOriginalUrl(currentPage.pageId)
+            iframeMap[key] = obj
+          }
           break
         }
       }
     }
+  }
+  // 建立映射
+  getIframeMap (){
+
   }
   /**
    * 获取当前iframe队列
@@ -268,16 +314,66 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
    * @private watchScroll：小说内部私有方法，用于监控滚动条
    */
   watchScroll () {
-    if (!this.isScrollToPageBottom() || prerenderFlag) {
-      prerenderFlag = false
-      setTimeout(this.watchScroll.bind(this), 2000)
-      return
+    if(lastScrollY <= this.rootPageWin.scrollY){
+      lastScrollY = this.rootPageWin.scrollY
+      if (!this.isScrollToPageBottom() || prerenderFlag) {
+        prerenderFlag = false
+        setTimeout(this.watchScroll.bind(this), 500)
+        return
+      }
+    } else {
+      lastScrollY = this.rootPageWin.scrollY
+      let jsonld = getJsonld(currentIframeWindow)
+      if (this.isVisible(jsonld.previousPage.url)) {
+        loading = true
+        let pageId = jsonld.previousPage.url
+        this.showLoading()
+        this.getCacheIframe(iframeMap[pageId].iframe, pageId)
+        console.log('上去')
+        setTimeout(this.watchScroll.bind(this), 500)
+        return
+      } else {
+        setTimeout(this.watchScroll.bind(this), 500)
+        return
+      }
     }
+    
+    loading = true
     let jsonld = getJsonld(currentIframeWindow)
     // if(!rootPageHideflag) this.hideRootPage()
     this.unlimitedPulldown(jsonld)
   }
+  // 是否可见
+  isVisible (pageId) {
+    let height = 0
+    let offsetTop = 0
+    let topWall = this.rootPageWin.scrollY - 1000
+    if(iframeMap[pageId]){
+      height = parseInt(iframeMap[pageId].height)
+      offsetTop = iframeMap[pageId].top
+    }
 
+    if ( height + offsetTop > topWall) {
+      return true
+    }
+
+    return false
+
+  }
+  getCacheIframe (iframe,pageId){
+    let div = document.querySelectorAll('div[iframeid="'+ pageId +'"]')
+    if(div[0]){
+      this.rootPageWin.document.body.insertBefore(iframe, div[0])
+      this.rootPageWin.document.body.removeChild(div[0])
+      console.log(iframe)
+      console.log(iframe.contentWindow)
+      debugger
+      console.log(iframe.contentWindow.MIP)
+      currentIframeWindow = iframe.contentWindow.MIP.viewer.page.targetWindow
+    }
+    loading = false
+    this.removeLoading()
+  }
   getCacheUrl (url) {
     if(!!url) {
       let netUrl = url.split('/')[2].split('.').join('-')

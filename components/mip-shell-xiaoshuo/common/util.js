@@ -160,7 +160,6 @@ function addClass(elements,cName){
 export const getCurrentIframe = (iframe,url) =>{
   if(!iframe[1] || !iframe[1].contentWindow || !iframe[1].contentWindow.MIP) return
   const $el = iframe[1]
-  // console.log($el.getAttribute("prerender"))
   nextWindow = $el.contentWindow.MIP.viewer.page.targetWindow
   if($el.dataset.pageId === url){
     const currentIframeDocument = $el.contentWindow.document
@@ -168,8 +167,6 @@ export const getCurrentIframe = (iframe,url) =>{
     $el.style.position = "static"
     $el.style.opacity = 1
     $el.style.height = $el.contentWindow.document.body.clientHeight + 400 + "px"
-    console.log($el.contentWindow.document.body.clientHeight)
-    console.log($el.style.height)
     $el.style.overflowY = "auto"
     const item = currentIframeDocument.querySelector('.mip-shell-xiaoshuo-container')
     if (item) {
