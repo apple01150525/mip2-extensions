@@ -32,27 +32,15 @@ export const getCurrentWindow = () => {
   let pageInfo = window.MIP.viewer.page.getPageById(pageId)
   return pageInfo.targetWindow
 }
-
 /**
- * 获取下一个的iframe的window
+ * 根据pageId获取window
  *
- * @returns {window} 当前下一个iframe的window
+ * @returns {window} 当前iframe的window
  */
-export const getNextWindow = () => {
-  return nextWindow
-}
-
-/**
- * 获取上一个的iframe的window
- *
- * @returns {window} 当前上一个iframe的window
- */
-export const getPreWindow = () => {
-  let pageId = window.MIP.viewer.page.currentPageId
+export const getIframeWindow = (pageId) => {
   let pageInfo = window.MIP.viewer.page.getPageById(pageId)
   return pageInfo.targetWindow
 }
-
 /**
  * 获取上级可scroll的元素
  *
@@ -158,9 +146,8 @@ function addClass(elements,cName){
  * 获取iframe
  */
 export const getCurrentIframe = (iframe,url) =>{
-  if(!iframe[1] || !iframe[1].contentWindow || !iframe[1].contentWindow.MIP) return
-  const $el = iframe[1]
-  nextWindow = $el.contentWindow.MIP.viewer.page.targetWindow
+  if(!iframe || !iframe.contentWindow || !iframe.contentWindow.MIP) return
+  const $el = iframe
   if($el.dataset.pageId === url){
     const currentIframeDocument = $el.contentWindow.document
     $el.style.display = "block"
@@ -180,6 +167,7 @@ export const getCurrentIframe = (iframe,url) =>{
       $el.isPrerender = false
       $el.removeAttribute('prerender')
     }
+    $el.contentWindow.MIP.viewer.page.replace($el.dataset.pageId, {skipRender: true})
   }
 }
 /**

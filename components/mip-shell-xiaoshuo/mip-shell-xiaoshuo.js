@@ -15,7 +15,7 @@ import {
 
 import XiaoshuoEvents from './common/events'
 import Strategy from './ad/strategy'
-import {getJsonld, scrollBoundary, getCurrentWindow, getNextWindow, getCurrentIframe, initNextIframe} from './common/util'
+import {getJsonld, scrollBoundary, getCurrentWindow, getIframeWindow, getCurrentIframe} from './common/util'
 import {sendWebbLog, sendTCLog} from './common/log' // 日志
 import * as flag from './common/flag' // 日志
 import { setTimeout, clearTimeout} from 'timers';
@@ -203,17 +203,14 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     this.showLoading()
     let page = this.rootPageWin.MIP.viewer.page
     let nextPageUrl = jsonld.nextPage.url
-    let prePageUrl = jsonld.previousPage.url
-    window.MIP.viewer.page.replace(nextPageUrl, {skipRender: true})
-    
     if(window.MIP.util.isCacheUrl(location.href)) { //处于cache下，需要转换cacheUrl
-      window.MIP.viewer.page.prerender([this.getCacheUrl(prePageUrl), this.getCacheUrl(nextPageUrl)]).then( iframe => {
+      window.MIP.viewer.page.prerender([this.getCacheUrl(nextPageUrl)]).then( iframe => {
         prerenderFlag = true
-        const currentIframeQuery = this.getIframeQuery(currentIframeWindow, iframe)
+        const currentIframeQuery = this.getIframeQuery(currentIframeWindow, iframe[0])
         iframeQuery = currentIframeQuery.slice(0)
         this.removeIframe()
-        getCurrentIframe(iframe,this.getCacheUrl(nextPageUrl))
-        // window.MIP.viewer.page.replace(nextPageUrl, {skipRender: true})
+        getCurrentIframe(iframe[0],this.getCacheUrl(nextPageUrl))
+        let url = this.getCacheUrl(nextPageUrl)
         this.removeLoading()
         loading = false
       })
@@ -223,7 +220,8 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
         getCurrentIframe(iframe)
       })
     }
-    currentIframeWindow  = getNextWindow()
+    let pageid = this.getCacheUrl(MIP.util.getOriginalUrl(location.href))
+    currentIframeWindow  = getIframeWindow(pageid)
     setTimeout(this.watchScroll.bind(this), 500)
   }
   /**
@@ -243,7 +241,6 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
         let div = null
         let obj = {}
         if (iframe1.parentNode) {
-          
           if( iframe1.contentWindow.document.body.clientHeight) {
             div = document.createElement('div')
             div.setAttribute('iframeId', MIP.util.getOriginalUrl(currentPage.pageId))
@@ -252,7 +249,6 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
             obj.height = div.style.height
             this.rootPageWin.document.body.insertBefore(div,iframe1)
           }
-          obj.iframe = iframe1
           iframe1.parentNode.removeChild(iframe1)
           page.children.splice(i, 1)
           if (div) {
@@ -278,9 +274,9 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     let page = currentWindow.MIP.viewer.page
     let arrayIframe = []
     arrayIframe.push(page.pageId)
-    iframe.forEach((item) => {
-      !item || !item.contentWindow || !item.contentWindow.MIP ? arrayIframe.push(null) : arrayIframe.push(item.contentWindow.MIP.pageId)
-    })
+    for (let i = 0; i < iframe.length-1; i++){
+      !iframe[i] || !iframe[i].contentWindow || !iframe[i].contentWindow.MIP ? arrayIframe.push(null) : arrayIframe.push(iframe[i].contentWindow.MIP.pageId)
+    }
 
     return arrayIframe
   }
@@ -324,12 +320,12 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     } else {
       lastScrollY = this.rootPageWin.scrollY
       let jsonld = getJsonld(currentIframeWindow)
+      console.log(jsonld)
       if (this.isVisible(jsonld.previousPage.url)) {
         loading = true
         let pageId = jsonld.previousPage.url
         this.showLoading()
-        this.getCacheIframe(iframeMap[pageId].iframe, pageId)
-        console.log('上去')
+        this.getCacheIframe(pageId)
         setTimeout(this.watchScroll.bind(this), 500)
         return
       } else {
@@ -360,24 +356,42 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     return false
 
   }
-  getCacheIframe (iframe,pageId){
-    let div = document.querySelectorAll('div[iframeid="'+ pageId +'"]')
-    if(div[0]){
-      this.rootPageWin.document.body.insertBefore(iframe, div[0])
-      this.rootPageWin.document.body.removeChild(div[0])
-      console.log(iframe)
-      console.log(iframe.contentWindow)
-      debugger
-      console.log(iframe.contentWindow.MIP)
-      currentIframeWindow = iframe.contentWindow.MIP.viewer.page.targetWindow
-    }
+  getCacheIframe (pageId){
+    let id = this.getCacheUrl(pageId)
+    window.MIP.viewer.page.prerender([
+      id
+    ]).then(iframe => {
+      const $el = iframe
+      let div = document.querySelectorAll('div[iframeid="'+ id +'"]')
+      if(div[0]){
+        $el.style.display = "block"
+        $el.style.position = "static"
+        $el.style.opacity = 1
+        $el.style.height = $el.contentWindow.document.body.clientHeight + 400 + "px"
+        $el.style.overflowY = "auto"
+        this.rootPageWin.document.body.insertBefore($el, div[0])
+        this.rootPageWin.document.body.removeChild(div[0])
+        if ($el.isPrerender || ($el && $el.getAttribute('prerender') === '1')) {
+          $el.contentWindow.postMessage({
+            name: window.name,
+            event: Constant.MESSAGE_PAGE_ACTIVE
+          },'*')
+          $el.isPrerender = false
+          $el.removeAttribute('prerender')
+        }
+        $el.MIP.viewer.page.replace(pageId, {skipRender: true})
+        let pageid = this.getCacheUrl(MIP.util.getOriginalUrl(location.href))
+        currentIframeWindow  = getIframeWindow(pageid)
+      }
+    })
+    
+    
     loading = false
     this.removeLoading()
   }
   getCacheUrl (url) {
     if(!!url) {
-      let netUrl = url.split('/')[2].split('.').join('-')
-      return `https://${netUrl}.mipcdn.com${MIP.util.makeCacheUrl(url)}`
+      return MIP.util.makeCacheUrl(url,'url',true)
     }
     return ''
   }
