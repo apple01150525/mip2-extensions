@@ -318,12 +318,15 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
         return
       }
     } else {
+      console.log(iframeMap)
+      console.log(location.href)
       lastScrollY = this.rootPageWin.scrollY
       let jsonld = getJsonld(currentIframeWindow)
       console.log(jsonld)
-      if (this.isVisible(jsonld.previousPage.url)) {
+      console.log(this.isVisible(location.href))
+      if (this.isVisible(location.href)) {
         loading = true
-        let pageId = jsonld.previousPage.url
+        let pageId = location.href
         this.showLoading()
         this.getCacheIframe(pageId)
         setTimeout(this.watchScroll.bind(this), 500)
@@ -356,6 +359,7 @@ export default class MipShellXiaoshuo extends MIP.builtinComponents.MipShell {
     return false
 
   }
+  
   getCacheIframe (pageId){
     let id = this.getCacheUrl(pageId)
     window.MIP.viewer.page.prerender([
